@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>4NF Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .violation-row td { background:#fff3cd !important; color:#856404; font-weight:500; }
+    .clean-row td { background:#d1e7dd !important; }
+    .table-scroll { max-height:300px; overflow-y:auto; }
+  </style>
+</head>
+<body class="bg-light">
+
+  <nav class="navbar navbar-dark bg-dark px-4">
+    <span class="navbar-brand fw-bold">4NF Optimizer</span>
+    <div class="d-flex gap-3 align-items-center">
+      <span class="text-white-50 small">admin</span>
+      <a href="/logout" class="btn btn-outline-light btn-sm">Logout</a>
+    </div>
+  </nav>
+
+  <div class="container-fluid px-4 py-4">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}{% for cat, msg in messages %}
+        <div class="alert alert-{{ cat }} alert-dismissible fade show">{{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}{% endif %}
+    {% endwith %}
+
+    <!-- Control Cards -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">Upload Dataset</h6>
+            <p class="text-muted small">Upload a denormalized CSV file.</p>
+            <form action="/upload" method="post" enctype="multipart/form-data">
+              <input type="file" name="file" class="form-control mb-2" accept=".csv" required>
+              <button class="btn btn-dark w-100">Upload CSV</button>
+            </form>
+            {% if session.get('columns') %}
+              <div class="mt-2 p-2 bg-light border rounded small">
+                <strong>{{ session['rows'] }} rows</strong> | <code>{{ session['columns']|join(', ') }}</code>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">Dependency Analysis</h6>
+            <p class="text-muted small">Detect Functional Dependencies and MVDs.</p>
+            <form action="/analyze" method="post">
+              <button class="btn btn-info w-100 text-white">Run FD + MVD Analysis</button>
+            </form>
+            {% if session.get('mvds') %}
+              <div class="mt-2 small"><strong>MVDs:</strong>
+                {% for m in session['mvds'] %}<span class="badge bg-warning text-dark me-1">{{ m }}</span>{% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">4NF Decomposition</h6>
+            <p class="text-muted small">Split MVD: A →→ B | C into 2 clean tables.</p>
+            <form action="/run-4nf" method="post">
+              <input type="text" name="determinant" class="form-control mb-2" placeholder="Determinant e.g. customer_id" required>
+              <input type="text" name="attr1" class="form-control mb-2" placeholder="Attribute 1 e.g. product_name" required>
+              <input type="text" name="attr2" class="form-control mb-2" placeholder="Attribute 2 e.g. delivery_city" required>
+              <button class="btn btn-success w-100">Decompose to 4NF</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Before / After -->
+    {% if raw_cols %}
+    <div class="row g-3">
+
+      <div class="col-lg-5">
+        <div class="card shadow-sm border-danger">
+          <div class="card-header bg-danger text-white d-flex justify-content-between">
+            <strong>BEFORE — Original Table</strong>
+            {% if violation_rows %}<span class="badge bg-light text-danger">⚠ {{ violation_rows|length }} violations</span>{% endif %}
+          </div>
+          {% if violation_rows %}
+          <div class="px-3 pt-2">
+            <div class="alert alert-warning py-2 small mb-0">
+              🔴 Yellow rows violate 4NF — <code>{{ decomp.det }}</code> maps to multiple independent <code>{{ decomp.attr1 }}</code> and <code>{{ decomp.attr2 }}</code> values.
+            </div>
+          </div>
+          {% endif %}
+          <div class="table-scroll">
+            <table class="table table-sm table-bordered mb-0 small">
+              <thead class="table-dark sticky-top">
+                <tr>{% for col in raw_cols %}<th>{{ col }}</th>{% endfor %}<th></th></tr>
+              </thead>
+              <tbody>
+                {% for row in raw_data %}
+                <tr class="{{ 'violation-row' if loop.index0 in violation_rows else '' }}">
+                  {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+                  <td>{% if loop.index0 in violation_rows %}<span class="badge bg-danger">4NF ✗</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-1 d-none d-lg-flex align-items-center justify-content-center">
+        <div class="text-center text-muted"><div style="font-size:2.5rem;">➜</div><small>4NF</small></div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card shadow-sm border-success">
+          <div class="card-header bg-success text-white"><strong>AFTER — Decomposed Tables</strong></div>
+          <div class="card-body">
+            {% if decomp %}
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong class="small">📄 table_{{ decomp.attr1 }} <span class="badge bg-success">{{ decomp.t1_rows }} rows</span></strong>
+                <a href="/download/table_{{ decomp.attr1 }}.csv" class="btn btn-outline-success btn-sm" style="font-size:.65rem;">⬇ Download</a>
+              </div>
+              <div class="table-scroll mb-3">
+                <table class="table table-sm table-bordered small">
+                  <thead class="table-success"><tr>{% for col in t1_cols %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+                  <tbody>{% for row in t1_data %}<tr class="clean-row">{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+                </table>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong class="small">📄 table_{{ decomp.attr2 }} <span class="badge bg-primary">{{ decomp.t2_rows }} rows</span></strong>
+                <a href="/download/table_{{ decomp.attr2 }}.csv" class="btn btn-outline-primary btn-sm" style="font-size:.65rem;">⬇ Download</a>
+              </div>
+              <div class="table-scroll">
+                <table class="table table-sm table-bordered small">
+                  <thead class="table-primary"><tr>{% for col in t2_cols %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+                  <tbody>{% for row in t2_data %}<tr class="clean-row">{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="text-center text-muted py-4">Complete decomposition above to see output here.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% endif %}
+
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
